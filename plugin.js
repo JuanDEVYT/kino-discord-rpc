@@ -202,7 +202,7 @@ export async function resolve() {
 export async function action(key) {
   if (key === "link_account") {
     // Intentar con visualBrowser si está disponible
-    if (kino.visualBrowser && kino.visualBrowser.available()) {
+    if (kino.visualBrowser?.available) {
       const result = await kino.visualBrowser.open({
         url: "https://discord.com/login",
         title: "Iniciar sesión en Discord",
