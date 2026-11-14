@@ -4,13 +4,12 @@
   "version": "1.0.0",
   "apiVersion": 13,
   "entry": "plugin.js",
-  "visualBrowser": false,
   "hosts": [
     "discord.com",
     "gateway.discord.gg",
     "image.tmdb.org"
   ],
-  "capabilities": ["socket"],
+  "capabilities": ["socket", "resolve", "search"],
   "panel": {
     "label": "Discord RPC",
     "labelEn": "Discord RPC",
@@ -44,8 +43,8 @@
       "label": "Botón en Discord",
       "labelEn": "Discord button",
       "options": [
-        { "value": "install", "label": "Instalar Kino" },
-        { "value": "none",    "label": "Sin botón" }
+        { "value": "install", "label": "Instalar Kino", "labelEn": "Install Kino" },
+        { "value": "none",    "label": "Sin botón",     "labelEn": "No button" }
       ],
       "default": "install"
     }
