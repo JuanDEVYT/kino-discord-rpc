@@ -203,28 +203,36 @@ export async function action(key) {
   if (key === "link_account") {
     // Intentar con visualBrowser si está disponible
     if (kino.visualBrowser?.available) {
+      // Discord guarda el token en localStorage, no en cookies ni en el HTML.
+      // Con visualBrowser no podemos ejecutar JS, pero sí leer el HTML de la
+      // página /channels/@me que incluye el bootstrap de Redux con el token
+      // embebido como parte del estado inicial de la app.
+      // Patrón real: "token":"MTEx..." dentro del JSON del estado de Redux.
       const result = await kino.visualBrowser.open({
         url: "https://discord.com/login",
-        title: "Iniciar sesión en Discord",
-        // Kino cierra la ventana automáticamente en cuanto aparezca la cookie
-        // "token" — el usuario no necesita presionar nada ni cerrar con X
-        doneWhen: { cookies: ["token"] },
-        collect: { cookies: ["token"] },
+        title: "Iniciar sesión en Discord — presiona Listo cuando veas tu lista de amigos",
+        collect: { html: true },
         timeoutMs: 300000,
       });
 
-      if (result.status !== "done") {
-        return { message: "Vinculación cancelada. Inicia sesión en Discord y espera a que la ventana se cierre sola." };
+      if (result.status === "closed") {
+        return { message: "Vinculación cancelada." };
       }
 
-      const cookieToken = result.cookies && result.cookies["token"];
-      if (cookieToken && isValidToken(cookieToken)) {
-        await kino.config.set("discord_token", cookieToken);
+      // Buscar el token en el HTML del estado inicial de Redux
+      // Discord lo inyecta como: "token":"MTEx..." o token:"MTEx..."
+      const html = result.html || "";
+      const match =
+        html.match(/"token"\s*:\s*"([A-Za-z0-9+/]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,})"/) ||
+        html.match(/token\s*:\s*"([A-Za-z0-9+/]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,})"/);
+
+      if (match && isValidToken(match[1])) {
+        await kino.config.set("discord_token", match[1]);
         return { message: "Cuenta de Discord vinculada ✓" };
       }
 
       return {
-        message: "Sesión iniciada pero Discord no expuso la cookie de token. Pega el token manualmente en Ajustes.",
+        message: "No se encontró el token en la página. Después de iniciar sesión, navega a discord.com/channels/@me y presiona Listo.",
       };
     }
 
