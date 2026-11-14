@@ -202,34 +202,32 @@ export async function resolve() {
 export async function action(key) {
   if (key === "link_account") {
     // Intentar con visualBrowser si está disponible
-    if (kino.visualBrowser && kino.visualBrowser.available) {
+    if (kino.visualBrowser && kino.visualBrowser.available()) {
       const result = await kino.visualBrowser.open({
         url: "https://discord.com/login",
         title: "Iniciar sesión en Discord",
-        // Discord redirige a /app cuando el login es exitoso
-        doneWhen: { urlMatches: "discord.com/app" },
-        collect: { html: true, finalUrl: true },
-        userAgent: "browser",
+        // Discord redirige a /channels/@me o /app al completar el login
+        doneWhen: { urlMatches: "discord.com/channels/*" },
+        // Discord guarda el token del usuario en la cookie "token"
+        // (misma técnica que BitChord: leer el store de sesión tras el login)
+        collect: { cookies: ["token"], finalUrl: true },
         timeoutMs: 300000,
       });
 
       if (result.status !== "done") {
-        return { message: "Vinculación cancelada. Pega el token manualmente en Ajustes." };
+        return { message: "Vinculación cancelada. Pega el token manualmente en el campo de Ajustes." };
       }
 
-      // El token puede aparecer en el HTML del /app como parte del bootstrap de Redux
-      // Patrón del token de usuario de Discord: Base64.timestamps.hmac
-      const html = result.html || "";
-      const tokenMatch = html.match(/[A-Za-z0-9+/]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}/);
-
-      if (tokenMatch && isValidToken(tokenMatch[0])) {
-        await kino.config.set("discord_token", tokenMatch[0]);
+      // Intentar primero desde la cookie "token" (método más directo)
+      const cookieToken = result.cookies && result.cookies["token"];
+      if (cookieToken && isValidToken(cookieToken)) {
+        await kino.config.set("discord_token", cookieToken);
         return { message: "Cuenta de Discord vinculada ✓" };
       }
 
-      // Si no se encontró en el HTML, pedir que lo peguen manualmente
+      // Fallback: Discord a veces no expone la cookie — pedir manual
       return {
-        message: "Sesión iniciada pero no se pudo extraer el token automáticamente. Pégalo manualmente (ver instrucciones en Ajustes).",
+        message: "Sesión iniciada pero no se pudo extraer el token automáticamente. Pégalo manualmente en Ajustes (token de usuario de Discord).",
       };
     }
 
