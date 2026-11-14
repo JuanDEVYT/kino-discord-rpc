@@ -206,28 +206,25 @@ export async function action(key) {
       const result = await kino.visualBrowser.open({
         url: "https://discord.com/login",
         title: "Iniciar sesión en Discord",
-        // Discord redirige a /channels/@me o /app al completar el login
-        doneWhen: { urlMatches: "discord.com/channels/*" },
-        // Discord guarda el token del usuario en la cookie "token"
-        // (misma técnica que BitChord: leer el store de sesión tras el login)
-        collect: { cookies: ["token"], finalUrl: true },
+        // Kino cierra la ventana automáticamente en cuanto aparezca la cookie
+        // "token" — el usuario no necesita presionar nada ni cerrar con X
+        doneWhen: { cookies: ["token"] },
+        collect: { cookies: ["token"] },
         timeoutMs: 300000,
       });
 
       if (result.status !== "done") {
-        return { message: "Vinculación cancelada. Pega el token manualmente en el campo de Ajustes." };
+        return { message: "Vinculación cancelada. Inicia sesión en Discord y espera a que la ventana se cierre sola." };
       }
 
-      // Intentar primero desde la cookie "token" (método más directo)
       const cookieToken = result.cookies && result.cookies["token"];
       if (cookieToken && isValidToken(cookieToken)) {
         await kino.config.set("discord_token", cookieToken);
         return { message: "Cuenta de Discord vinculada ✓" };
       }
 
-      // Fallback: Discord a veces no expone la cookie — pedir manual
       return {
-        message: "Sesión iniciada pero no se pudo extraer el token automáticamente. Pégalo manualmente en Ajustes (token de usuario de Discord).",
+        message: "Sesión iniciada pero Discord no expuso la cookie de token. Pega el token manualmente en Ajustes.",
       };
     }
 
