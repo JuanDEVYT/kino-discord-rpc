@@ -210,7 +210,7 @@ export async function action(key) {
       // Patrón real: "token":"MTEx..." dentro del JSON del estado de Redux.
       const result = await kino.visualBrowser.open({
         url: "https://discord.com/login",
-        title: "Iniciar sesión en Discord — presiona Listo cuando veas tu lista de amigos",
+        title: "Inicia sesión y presiona Listo",
         collect: { html: true },
         timeoutMs: 300000,
       });
