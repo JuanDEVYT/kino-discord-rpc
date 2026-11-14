@@ -1,0 +1,58 @@
+{
+  "id": "discord-rpc",
+  "name": "Discord RPC",
+  "version": "1.0.0",
+  "apiVersion": 13,
+  "entry": "plugin.js",
+  "visualBrowser": false,
+  "hosts": [
+    "discord.com",
+    "gateway.discord.gg",
+    "image.tmdb.org"
+  ],
+  "capabilities": ["socket"],
+  "panel": {
+    "label": "Discord RPC",
+    "labelEn": "Discord RPC",
+    "icon": "bolt"
+  },
+  "settings": [
+    {
+      "key": "discord_token",
+      "type": "password",
+      "label": "Token de Discord",
+      "labelEn": "Discord token",
+      "hint": "Vincula tu cuenta con el botón de abajo, o pega el token manualmente",
+      "hintEn": "Link your account below, or paste the token manually",
+      "sync": false
+    },
+    {
+      "key": "link_account",
+      "type": "action",
+      "label": "Vincular cuenta de Discord",
+      "labelEn": "Link Discord account"
+    },
+    {
+      "key": "unlink_account",
+      "type": "action",
+      "label": "Desvincular cuenta",
+      "labelEn": "Unlink account"
+    },
+    {
+      "key": "show_button",
+      "type": "select",
+      "label": "Botón en Discord",
+      "labelEn": "Discord button",
+      "options": [
+        { "value": "install", "label": "Instalar Kino" },
+        { "value": "none",    "label": "Sin botón" }
+      ],
+      "default": "install"
+    }
+  ],
+  "enhancements": {
+    "20": {
+      "visualBrowser": true
+    }
+  }
+}
