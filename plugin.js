@@ -218,18 +218,21 @@ export async function action(key) {
         return { message: "Vinculación cancelada." };
       }
 
-      // El valor en localStorage incluye las comillas: "\"MTEx...\""
-      const raw = result.localStorage && result.localStorage["token"];
-      const cookieToken = raw ? raw.replace(/^"|"$/g, "") : null;
+      // Kino viejo ignora collect.localStorage y no trae el campo
+      if (!result.localStorage) {
+        return { message: "Este Kino no puede leer localStorage. Actualiza la app." };
+      }
 
-      if (cookieToken && isValidToken(cookieToken)) {
-        await kino.config.set("discord_token", cookieToken);
+      // Discord guarda el token con comillas: '"MTEx..."' → quitar comillas
+      const raw = result.localStorage["token"];
+      const token = raw ? raw.replace(/^"|"$/g, "") : null;
+
+      if (token && isValidToken(token)) {
+        await kino.config.set("discord_token", token);
         return { message: "Cuenta de Discord vinculada ✓" };
       }
 
-      return {
-        message: "Sesión iniciada pero no se encontró el token. Intenta de nuevo.",
-      };
+      return { message: "Sesión iniciada pero no se encontró el token. Intenta de nuevo." };
     }
 
     // Sin visualBrowser: instrucciones manuales

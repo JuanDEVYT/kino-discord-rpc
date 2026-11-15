@@ -1,7 +1,7 @@
 {
   "id": "discord-rpc",
   "name": "Discord RPC",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "apiVersion": 13,
   "entry": "plugin.js",
   "hosts": [
