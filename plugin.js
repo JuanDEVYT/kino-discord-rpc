@@ -203,36 +203,32 @@ export async function action(key) {
   if (key === "link_account") {
     // Intentar con visualBrowser si está disponible
     if (kino.visualBrowser?.available) {
-      // Discord guarda el token en localStorage, no en cookies ni en el HTML.
-      // Con visualBrowser no podemos ejecutar JS, pero sí leer el HTML de la
-      // página /channels/@me que incluye el bootstrap de Redux con el token
-      // embebido como parte del estado inicial de la app.
-      // Patrón real: "token":"MTEx..." dentro del JSON del estado de Redux.
+      // Discord guarda el token en localStorage["token"] (con comillas incluidas).
+      // El SDK ahora soporta collect.localStorage — Kino cierra la ventana
+      // automáticamente cuando aparezca la clave y la devuelve al plugin.
       const result = await kino.visualBrowser.open({
         url: "https://discord.com/login",
-        title: "Inicia sesión y presiona Listo",
-        collect: { html: true },
+        title: "Inicia sesión en Discord",
+        doneWhen: { localStorage: ["token"] },
+        collect: { localStorage: ["token"] },
         timeoutMs: 300000,
       });
 
-      if (result.status === "closed") {
+      if (result.status !== "done") {
         return { message: "Vinculación cancelada." };
       }
 
-      // Buscar el token en el HTML del estado inicial de Redux
-      // Discord lo inyecta como: "token":"MTEx..." o token:"MTEx..."
-      const html = result.html || "";
-      const match =
-        html.match(/"token"\s*:\s*"([A-Za-z0-9+/]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,})"/) ||
-        html.match(/token\s*:\s*"([A-Za-z0-9+/]{24,}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,})"/);
+      // El valor en localStorage incluye las comillas: "\"MTEx...\""
+      const raw = result.localStorage && result.localStorage["token"];
+      const cookieToken = raw ? raw.replace(/^"|"$/g, "") : null;
 
-      if (match && isValidToken(match[1])) {
-        await kino.config.set("discord_token", match[1]);
+      if (cookieToken && isValidToken(cookieToken)) {
+        await kino.config.set("discord_token", cookieToken);
         return { message: "Cuenta de Discord vinculada ✓" };
       }
 
       return {
-        message: "No se encontró el token en la página. Después de iniciar sesión, navega a discord.com/channels/@me y presiona Listo.",
+        message: "Sesión iniciada pero no se encontró el token. Intenta de nuevo.",
       };
     }
 
