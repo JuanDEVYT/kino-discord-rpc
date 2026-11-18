@@ -1,4 +1,4 @@
-// Discord RPC — Kino TV plugin v1.0.12
+// Discord RPC — Kino TV plugin v1.0.13
 // Muestra en Discord lo que se está viendo en Kino (de cualquier plugin) con el
 // Gateway de Discord por WebSocket.
 // Protocolo basado en Kizzy (github.com/dead8309/Kizzy), adaptado a QuickJS/Kino.
@@ -13,6 +13,7 @@ const OP_INVALID_SESSION = 9;
 const OP_HELLO = 10;
 const OP_HEARTBEAT_ACK = 11;
 const APP_ID = "1570998800338915448";
+const PLUGIN_VERSION = "1.0.13"; // debe coincidir con kino-plugin.json
 
 // Kino sólo ejecuta este código mientras dura una de sus llamadas (y cierra el
 // sandbox tras 5 minutos sin llamadas), así que no hay nada vivo entre llamadas:
@@ -35,6 +36,16 @@ const MANUAL_HINT =
   "window.webpackChunkdiscord_app.push([[''],{},e=>{m=[];for(let c in e.c)m.push(e.c[c]);" +
   "window.token=m.find(m=>m?.exports?.default?.getToken).exports.default.getToken()}]); " +
   "y copia aquí el resultado de window.token.";
+
+// Cada vez que Kino carga el plugin (instalación, actualización o primer uso
+// tras reiniciar el sandbox) queda esta línea en el log: así se sabe qué
+// versión está corriendo de verdad en el aparato.
+try {
+  kino.log(
+    `discord-rpc: plugin v${PLUGIN_VERSION} cargado` +
+      ` (apiVersion ${kino.apiVersion || "?"}, Kino ${kino.appVersion || "?"})`
+  );
+} catch (_) {}
 
 // ── Estado del socket ─────────────────────────────────────────────────────────
 // Vive mientras viva el sandbox: es una caché del socket abierto, nada más.
@@ -463,10 +474,21 @@ export async function action(key) {
       ACTION_BUDGET_MS
     );
     rememberSync(ok ? Date.now() : 0);
+    // Además, un estado personalizado de 2 minutos: eso se ve al instante en
+    // tu nombre, aunque el rich presence dure menos.
+    const custom = await patchCustomStatus(
+      token,
+      customFor("▶ Probando Kino TV", Date.now() + 120000)
+    );
+    kino.log(`discord-rpc v${PLUGIN_VERSION}: prueba de estado · presencia ${ok ? "enviada" : "NO"} · estado personalizado ${custom ? "puesto" : "NO"}`);
     if (!ok) {
       return { message: "No se pudo conectar con Discord. Revisa internet y reintenta." };
     }
-    return { message: "Estado de prueba enviado ✓ Mira tu perfil de Discord (se quita solo en ~1 minuto)." };
+    return {
+      message: custom
+        ? "Enviado ✓ Mira tu perfil: «Kino TV» y «▶ Probando Kino TV» (2 min)."
+        : "Presencia enviada ✓ No se pudo poner el estado personalizado.",
+    };
   }
 
   if (key === "link_account") {
@@ -558,9 +580,10 @@ async function checkToken(token) {
 // ── Ajustes: línea de estado ─────────────────────────────────────────────────
 
 export async function settingsStatus() {
+  const version = `v${PLUGIN_VERSION}`;
   const token = await getToken();
   if (!isValidToken(token)) {
-    return { discord_status: "⚠ Falta el token: usa «Vincular cuenta de Discord»" };
+    return { discord_status: `${version} · ⚠ Falta el token: usa «Vincular cuenta»` };
   }
 
   const syncAge = lastSyncAge();
@@ -572,14 +595,14 @@ export async function settingsStatus() {
   } catch (_) {}
 
   if (lastAt > 0) {
-    const sent = syncAge >= 0 ? `estado enviado ${formatAge(syncAge, false)}` : "sin estado activo";
+    const sent = syncAge >= 0 ? `enviado ${formatAge(syncAge, false)}` : "sin estado activo";
     return {
-      discord_status: `✓ Kino avisó (${lastType}) ${formatAge(Date.now() - lastAt, false)} · ${sent}`,
+      discord_status: `${version} · ✓ avisó (${lastType}) ${formatAge(Date.now() - lastAt, false)} · ${sent}`,
     };
   }
 
   return {
-    discord_status: "○ Sin avisos de reproducción: revisa el permiso de «tracking» en este plugin",
+    discord_status: `${version} · ○ sin avisos de reproducción (permiso de tracking)`, 
   };
 }
 
@@ -671,7 +694,7 @@ export async function track(event) {
   const token = await getToken();
   if (!isValidToken(token)) {
     kino.log(
-      `discord-rpc: ${type} sin token válido (` +
+      `discord-rpc v${PLUGIN_VERSION}: ${type} sin token válido (` +
         (token ? "formato no reconocido, " + token.length + " caracteres" : "vacío") +
         "), no se envía nada"
     );
@@ -696,14 +719,14 @@ export async function track(event) {
     }
 
     kino.log(
-      `discord-rpc: ${type}${paused ? " (pausa)" : ""} · presencia ${ok ? "enviada" : "NO"}` +
+      `discord-rpc v${PLUGIN_VERSION}: ${type}${paused ? " (pausa)" : ""} · presencia ${ok ? "enviada" : "NO"}` +
         ` · estado personalizado ${custom} · ${Date.now() - startedAt} ms`
     );
   } else if (type === "stop" || type === "watched") {
     await clearPresence();
     rememberSync(0);
     if (persistStatus()) await restoreCustomStatus(token);
-    kino.log(`discord-rpc: ${type} · presencia borrada · ${Date.now() - startedAt} ms`);
+    kino.log(`discord-rpc v${PLUGIN_VERSION}: ${type} · presencia borrada · ${Date.now() - startedAt} ms`);
   }
 
   // Nunca se falla: un estado que no se pudo enviar no merece reintentos.
