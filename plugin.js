@@ -1,5 +1,6 @@
-// Discord RPC — Kino TV plugin v1.0.9
-// Conecta con el Gateway de Discord por WebSocket y actualiza tu estado en tiempo real.
+// Discord RPC — Kino TV plugin v1.0.10
+// Muestra en Discord lo que se está viendo en Kino (de cualquier plugin) con el
+// Gateway de Discord por WebSocket.
 // Protocolo basado en Kizzy (github.com/dead8309/Kizzy), adaptado a QuickJS/Kino.
 
 // ── Constantes del protocolo Discord Gateway ──────────────────────────────────
@@ -13,11 +14,14 @@ const OP_HELLO = 10;
 const OP_HEARTBEAT_ACK = 11;
 const APP_ID = "1570998800338915448";
 
-const RECV_CHUNK_MS = 25000;   // espera máxima por frame (recv admite hasta 60 s)
-const CONNECT_WAIT_MS = 4000;  // lo que un evento del player espera al READY
-const PLAYER_WAIT_MS = 2500;   // playerEvent sólo tiene 5 s en total
-const RECONNECT_DELAY_MS = 4000;
-const MAX_FAILURES = 3;        // intentos seguidos sin READY antes de rendirse
+// Kino sólo ejecuta este código mientras dura una de sus llamadas (y cierra el
+// sandbox tras 5 minutos sin llamadas), así que no hay nada vivo entre llamadas:
+// cada llamada hace su handshake, su heartbeat y su presencia, y volvemos a
+// conectar en la siguiente. Por eso cada llamada tiene su propio presupuesto.
+const TRACK_BUDGET_MS = 8500;    // track tiene 10 s
+const PLAYER_BUDGET_MS = 4000;   // playerEvent tiene 5 s
+const PANEL_BUDGET_MS = 15000;   // panel y panelAction tienen 20 s
+const FRAME_WAIT_MS = 1500;      // trozo de espera de cada recv
 
 const MANUAL_HINT =
   "Para vincular a mano: abre Discord web → F12 → Consola → pega " +
@@ -25,19 +29,14 @@ const MANUAL_HINT =
   "window.token=m.find(m=>m?.exports?.default?.getToken).exports.default.getToken()}]); " +
   "y copia aquí el resultado de window.token.";
 
-// ── Estado del socket (vive mientras el plugin esté activo) ───────────────────
+// ── Estado del socket ─────────────────────────────────────────────────────────
+// Vive mientras viva el sandbox: es una caché del socket abierto, nada más.
 let ws = null;               // socket del Gateway o null
 let sequence = 0;            // último "s" recibido
 let connected = false;       // READY recibido en este socket
 let heartbeatMs = 41250;     // cadencia que pide HELLO
 let nextHeartbeatAt = 0;     // próximo heartbeat (0 = todavía sin HELLO)
 let awaitingAck = false;     // heartbeat enviado sin ACK
-let failures = 0;            // reconexiones seguidas sin READY
-let reconnectRunning = false;
-let wantConnection = false;  // el plugin quiere estar conectado (para reconectar)
-let readyWaiters = [];
-let lastActivity = null;     // último estado, para reenviarlo tras reconectar
-let lastActivitySet = false;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -78,29 +77,24 @@ function showButton() {
   }
 }
 
-function wakeReady() {
-  const waiters = readyWaiters;
-  readyWaiters = [];
-  for (const fn of waiters) {
-    try { fn(connected); } catch (_) {}
+// Cuándo se envió el último estado, para que el panel diga la verdad.
+function rememberSync(atMs) {
+  try { kino.storage.set("last_sync", String(atMs || 0)); } catch (_) {}
+}
+
+function lastSyncAge() {
+  try {
+    const t = Number(kino.storage.get("last_sync") || 0);
+    return t > 0 ? Date.now() - t : -1;
+  } catch (_) {
+    return -1;
   }
 }
 
-function waitForReady(maxMs) {
-  if (connected) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (value) => {
-      if (settled) return;
-      settled = true;
-      resolve(value === true);
-    };
-    readyWaiters.push(finish);
-    // kino.sleep espera como máximo 5 s, suficiente para el handshake
-    kino.sleep(Math.max(1, Math.min(5000, maxMs || CONNECT_WAIT_MS)))
-      .then(() => finish(connected))
-      .catch(() => finish(connected));
-  });
+function formatAge(ms, en) {
+  if (ms < 60000) return en ? "less than a minute ago" : "hace menos de un minuto";
+  const min = Math.round(ms / 60000);
+  return en ? `${min} min ago` : `hace ${min} min`;
 }
 
 // ── Discord Gateway WebSocket ─────────────────────────────────────────────────
@@ -140,48 +134,31 @@ function resetSocketState() {
   awaitingAck = false;
 }
 
-async function openGateway(token) {
-  // Cerrar conexión anterior si existe
-  const previous = ws;
+async function closeSocket() {
+  const socket = ws;
   ws = null;
   resetSocketState();
-  wakeReady();
-  if (previous) { try { await previous.close(); } catch (_) {} }
-
-  let socket;
-  try {
-    socket = await kino.ws.open(GATEWAY_URL);
-  } catch (e) {
-    kino.log("discord-rpc: no se pudo abrir el Gateway", e && (e.code || e.message));
-    return false;
-  }
-
-  ws = socket;
-  gatewayLoop(token, socket).catch((e) => {
-    kino.log("discord-rpc: loop terminado", e && (e.code || e.message));
-  });
-  return true;
+  if (socket) { try { await socket.close(); } catch (_) {} }
 }
 
-// Un solo lector del socket: aquí se leen los frames y se decide cuándo latir.
-async function gatewayLoop(token, socket) {
-  while (ws === socket) {
-    const now = Date.now();
+// Lee frames del Gateway y los atiende hasta READY o hasta que se acabe el
+// presupuesto de la llamada. Devuelve true cuando la sesión está lista.
+async function pump(socket, deadline, token) {
+  let identifyTries = 0;
 
-    if (nextHeartbeatAt && now >= nextHeartbeatAt) {
+  while (ws === socket && Date.now() < deadline) {
+    if (nextHeartbeatAt && Date.now() >= nextHeartbeatAt) {
       if (awaitingAck) {
         // Discord cierra la sesión si un heartbeat queda sin ACK
         kino.log("discord-rpc: heartbeat sin ACK, reconectando");
-        break;
+        return false;
       }
       awaitingAck = true;
-      if (!(await wsSend({ op: OP_HEARTBEAT, d: sequence || null }))) break;
+      if (!(await wsSend({ op: OP_HEARTBEAT, d: sequence || null }))) return false;
       nextHeartbeatAt = Date.now() + heartbeatMs;
     }
 
-    let waitMs = nextHeartbeatAt ? nextHeartbeatAt - Date.now() : RECV_CHUNK_MS;
-    if (waitMs < 1) waitMs = 1;
-    if (waitMs > RECV_CHUNK_MS) waitMs = RECV_CHUNK_MS;
+    const waitMs = Math.min(FRAME_WAIT_MS, Math.max(1, deadline - Date.now()));
 
     let frame;
     try {
@@ -189,11 +166,14 @@ async function gatewayLoop(token, socket) {
     } catch (e) {
       if (e && e.code === "timeout") continue;
       kino.log("discord-rpc: recv", e && (e.code || e.message));
-      break;
+      return false;
     }
     // null = no llegó nada en el plazo: la conexión sigue viva
-    if (frame === null) continue;
-    if (ws !== socket) break;
+    if (frame === null) {
+      if (connected) return true;
+      continue;
+    }
+    if (ws !== socket) return false;
 
     let p;
     try {
@@ -212,62 +192,43 @@ async function gatewayLoop(token, socket) {
       awaitingAck = false;
     } else if (p.op === 0 && p.t === "READY") {
       connected = true;
-      failures = 0;
-      wakeReady();
-      if (lastActivitySet) await wsSend(presencePayload(lastActivity));
+      return true;
     } else if (p.op === OP_INVALID_SESSION) {
       connected = false;
-      wakeReady();
+      if (identifyTries++ >= 1) return false; // dos intentos y fuera
       await kino.sleep(1200);
-      if (ws === socket) await identify(token);
+      if (Date.now() >= deadline) return false;
+      await identify(token);
     } else if (p.op === OP_RECONNECT) {
       kino.log("discord-rpc: Discord pidió reconectar");
-      break;
+      return false;
     }
   }
 
-  if (ws === socket) {
-    ws = null;
-    resetSocketState();
-    wakeReady();
-  }
-  if (wantConnection) scheduleReconnect();
+  return connected;
 }
 
-async function scheduleReconnect() {
-  if (reconnectRunning) return;
-  reconnectRunning = true;
-  try {
-    while (wantConnection && !ws && failures < MAX_FAILURES) {
-      await kino.sleep(RECONNECT_DELAY_MS);
-      if (!wantConnection || ws) break;
-      failures++;
-      const token = await getToken();
-      if (!isValidToken(token)) {
-        wantConnection = false;
-        break;
-      }
-      await openGateway(token);
-    }
-    if (wantConnection && !ws) {
-      kino.log("discord-rpc: se agotaron los reintentos de conexión");
-      wantConnection = false;
-    }
-  } finally {
-    reconnectRunning = false;
-  }
-}
-
-async function ensureConnected(maxWaitMs) {
+async function ensureConnected(deadline) {
   const token = await getToken();
   if (!isValidToken(token)) return false;
 
-  wantConnection = true;
   if (connected && ws) return true;
-  if (!ws) {
-    if (!(await openGateway(token))) return false;
+  if (ws) await closeSocket();
+
+  let socket;
+  try {
+    socket = await kino.ws.open(GATEWAY_URL);
+  } catch (e) {
+    kino.log("discord-rpc: no se pudo abrir el Gateway", e && (e.code || e.message));
+    return false;
   }
-  return waitForReady(maxWaitMs || CONNECT_WAIT_MS);
+
+  ws = socket;
+  resetSocketState();
+
+  const ok = await pump(socket, deadline, token);
+  if (!ok) await closeSocket();
+  return ok;
 }
 
 function presencePayload(activity) {
@@ -282,34 +243,39 @@ function presencePayload(activity) {
   };
 }
 
-async function sendPresence(activity, maxWaitMs) {
-  // Se guarda antes de esperar: si el READY llega tarde, se envía igualmente
-  lastActivity = activity;
-  lastActivitySet = true;
-
-  if (!(await ensureConnected(maxWaitMs))) return false;
-  const sent = await wsSend(presencePayload(activity));
-  if (!sent) connected = false;
-  return sent;
+// Late si toca: una llamada nueva es la única oportunidad de latir.
+async function maybeHeartbeat() {
+  if (!connected || !ws || !nextHeartbeatAt) return true;
+  if (Date.now() < nextHeartbeatAt) return true;
+  awaitingAck = true;
+  if (!(await wsSend({ op: OP_HEARTBEAT, d: sequence || null }))) return false;
+  nextHeartbeatAt = Date.now() + heartbeatMs;
+  return true;
 }
 
-async function disconnect() {
-  wantConnection = false;
-  lastActivity = null;
-  lastActivitySet = false;
+async function sendPresence(activity, budgetMs) {
+  const deadline = Date.now() + (budgetMs || TRACK_BUDGET_MS);
 
-  const socket = ws;
-  ws = null;
-  resetSocketState();
-  wakeReady();
-  if (socket) { try { await socket.close(); } catch (_) {} }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (!(await ensureConnected(deadline))) return false;
+    if (!(await maybeHeartbeat())) {
+      await closeSocket();
+      continue;
+    }
+    if (await wsSend(presencePayload(activity))) return true;
+    // El socket pudo morir mientras el sandbox estaba dormido: reconectamos.
+    await closeSocket();
+    if (Date.now() + 1000 >= deadline) return false;
+  }
+  return false;
 }
 
 async function clearPresence() {
-  if (connected && ws) {
+  const deadline = Date.now() + 4000;
+  if (await ensureConnected(deadline)) {
     try { await wsSend(presencePayload(null)); } catch (_) {}
   }
-  await disconnect();
+  await closeSocket();
 }
 
 // ── Actividad ─────────────────────────────────────────────────────────────────
@@ -419,7 +385,8 @@ export async function action(key) {
   }
 
   if (key === "unlink_account") {
-    await disconnect();
+    await closeSocket();
+    rememberSync(0);
     return { message: "Cuenta desvinculada.", clearSettings: ["discord_token"] };
   }
 
@@ -451,12 +418,13 @@ export async function panel(context) {
   const en = context.lang && context.lang.startsWith("en");
   const token = await getToken();
   const tokenOk = isValidToken(token);
+  const age = lastSyncAge();
 
   const statusText = !tokenOk
     ? (en ? "⚠ No token — go to Settings" : "⚠ Sin token — ve a Ajustes")
-    : connected
-      ? (en ? "✓ Connected to Discord" : "✓ Conectado a Discord")
-      : (en ? "○ Not connected" : "○ Sin conexión");
+    : age >= 0
+      ? (en ? `✓ Status sent ${formatAge(age, true)}` : `✓ Estado enviado ${formatAge(age, false)}`)
+      : (en ? "○ Waiting for playback" : "○ Esperando reproducción");
 
   const pos = formatMs(context.positionMs);
   const dur = context.durationMs ? formatMs(context.durationMs) : "--:--";
@@ -491,30 +459,73 @@ export async function panel(context) {
 
 export async function panelAction(event, context) {
   if (event.key === "sync_now") {
-    const ok = await sendPresence(buildActivity(context, context.paused));
+    const ok = await sendPresence(buildActivity(context, context.paused), PANEL_BUDGET_MS);
+    rememberSync(ok ? Date.now() : 0);
     return { message: ok
       ? "Estado sincronizado con Discord ✓"
       : "Error: vincula tu cuenta en Ajustes primero" };
   }
   if (event.key === "clear_rpc") {
     await clearPresence();
+    rememberSync(0);
     return { message: "Estado de Discord borrado ✓" };
   }
   return null;
 }
 
-// ── Player events ─────────────────────────────────────────────────────────────
+// ── Reproducción ──────────────────────────────────────────────────────────────
+// "tracking" es el único gancho que ve TODO lo que se reproduce en el aparato,
+// venga del plugin que venga: playerEvent sólo avisa de los títulos propios.
 
+function contextFromTrack(event) {
+  const isEpisode = event.kind === "episode";
+  const show = event.show && event.show.title ? event.show.title : "";
+
+  return {
+    kind: isEpisode ? "episode" : "movie",
+    title: isEpisode ? (show || event.title || "Kino TV") : (event.title || "Kino TV"),
+    season: event.season,
+    episode: event.episode,
+    episodeTitle: isEpisode ? event.title : null,
+    positionMs: event.positionMs || 0,
+    durationMs: event.durationMs || 0,
+  };
+}
+
+export async function track(event) {
+  const token = await getToken();
+  if (!isValidToken(token)) return { ok: true };
+
+  const type = event && event.type;
+
+  if (type === "start" || type === "progress") {
+    const paused = type === "progress" && event.paused === true;
+    const ok = await sendPresence(buildActivity(contextFromTrack(event), paused), TRACK_BUDGET_MS);
+    rememberSync(ok ? Date.now() : 0);
+  } else if (type === "stop" || type === "watched") {
+    await clearPresence();
+    rememberSync(0);
+  }
+
+  // Nunca se falla: un estado que no se pudo enviar no merece reintentos.
+  return { ok: true };
+}
+
+// Los títulos de este plugin no existen, así que Kino casi nunca llamará aquí;
+// se mantiene por si algún día el plugin sirve contenido propio.
 export async function playerEvent(event, context) {
   const token = await getToken();
   if (!isValidToken(token)) return null;
 
   if (event.type === "started" || event.type === "resumed") {
-    await sendPresence(buildActivity(context, false), PLAYER_WAIT_MS);
+    const ok = await sendPresence(buildActivity(context, false), PLAYER_BUDGET_MS);
+    rememberSync(ok ? Date.now() : 0);
   } else if (event.type === "paused") {
-    await sendPresence(buildActivity(context, true), PLAYER_WAIT_MS);
+    const ok = await sendPresence(buildActivity(context, true), PLAYER_BUDGET_MS);
+    rememberSync(ok ? Date.now() : 0);
   } else if (event.type === "ended" || event.type === "failed") {
     await clearPresence();
+    rememberSync(0);
   }
 
   return null;

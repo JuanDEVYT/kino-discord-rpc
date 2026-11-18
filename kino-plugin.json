@@ -1,7 +1,7 @@
 {
   "id": "discord-rpc",
   "name": "Discord RPC",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "apiVersion": 13,
   "entry": "plugin.js",
   "hosts": [
@@ -9,7 +9,7 @@
     "gateway.discord.gg",
     "image.tmdb.org"
   ],
-  "capabilities": ["socket", "resolve", "search"],
+  "capabilities": ["socket", "tracking", "resolve", "search"],
   "panel": {
     "label": "Discord RPC",
     "labelEn": "Discord RPC",
