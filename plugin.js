@@ -1,4 +1,4 @@
-// Discord RPC — Kino TV plugin v1.0.13
+// Discord RPC — Kino TV plugin v1.0.14
 // Muestra en Discord lo que se está viendo en Kino (de cualquier plugin) con el
 // Gateway de Discord por WebSocket.
 // Protocolo basado en Kizzy (github.com/dead8309/Kizzy), adaptado a QuickJS/Kino.
@@ -13,7 +13,7 @@ const OP_INVALID_SESSION = 9;
 const OP_HELLO = 10;
 const OP_HEARTBEAT_ACK = 11;
 const APP_ID = "1570998800338915448";
-const PLUGIN_VERSION = "1.0.13"; // debe coincidir con kino-plugin.json
+const PLUGIN_VERSION = "1.0.14"; // debe coincidir con kino-plugin.json
 
 // Kino sólo ejecuta este código mientras dura una de sus llamadas (y cierra el
 // sandbox tras 5 minutos sin llamadas), así que no hay nada vivo entre llamadas:
@@ -22,6 +22,7 @@ const PLUGIN_VERSION = "1.0.13"; // debe coincidir con kino-plugin.json
 const TRACK_BUDGET_MS = 8500;    // track tiene 10 s
 const PLAYER_BUDGET_MS = 4000;   // playerEvent tiene 5 s
 const PANEL_BUDGET_MS = 15000;   // panel y panelAction tienen 20 s
+const SLOT_BUDGET_MS = 4500;     // playerSlot tiene 5 s
 const ACTION_BUDGET_MS = 25000;  // action tiene 30 s
 const FRAME_WAIT_MS = 1500;      // trozo de espera de cada recv
 
@@ -55,6 +56,7 @@ let connected = false;       // READY recibido en este socket
 let heartbeatMs = 41250;     // cadencia que pide HELLO
 let nextHeartbeatAt = 0;     // próximo heartbeat (0 = todavía sin HELLO)
 let awaitingAck = false;     // heartbeat enviado sin ACK
+let lastActivity = null;     // último estado, para repetirlo cuando el contexto no trae título
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -302,6 +304,7 @@ async function maybeHeartbeat() {
 }
 
 async function sendPresence(activity, budgetMs) {
+  lastActivity = activity;
   const deadline = Date.now() + (budgetMs || TRACK_BUDGET_MS);
 
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -319,6 +322,7 @@ async function sendPresence(activity, budgetMs) {
 }
 
 async function clearPresence() {
+  lastActivity = null;
   const deadline = Date.now() + 4000;
   if (await ensureConnected(deadline)) {
     try { await wsSend(presencePayload(null)); } catch (_) {}
@@ -649,6 +653,59 @@ export async function panel(context) {
     refreshMs: 15000,
     elements,
   };
+}
+
+// ── Player slot (apiVersion 23): una llamada cada refreshMs mientras se ve
+// algo en la tele, sin abrir nada. Es lo que mantiene viva la conexión.
+
+function contextFromPanel(context) {
+  if (!context) return null;
+  if (context.live === true || context.kind === "live") {
+    const name = context.channel && context.channel.name ? context.channel.name : null;
+    return name ? { kind: "live", title: name, positionMs: 0, durationMs: 0 } : null;
+  }
+  if (!context.kind) return null; // contexto «bare»: Kino no comparte el título
+  return {
+    kind: context.kind === "episode" ? "episode" : "movie",
+    title: context.title || "Kino TV",
+    season: context.season,
+    episode: context.episode,
+    episodeTitle: context.episodeTitle,
+    positionMs: context.positionMs || 0,
+    durationMs: context.durationMs || 0,
+  };
+}
+
+export async function playerSlot(context) {
+  const token = await getToken();
+  let label = "Discord ✗";
+
+  if (isValidToken(token)) {
+    const ctx = contextFromPanel(context);
+    const paused = Boolean(context && context.paused);
+
+    if (ctx) {
+      const sent = await sendPresence(buildActivity(ctx, paused), SLOT_BUDGET_MS);
+      rememberSync(sent ? Date.now() : 0);
+      label = sent ? "Discord ✓" : "Discord ✗";
+      if (persistStatus() && !paused) {
+        await rememberCustomStatus(token);
+        await patchCustomStatus(
+          token,
+          customFor(customStatusText(ctx, false), Date.now() + CUSTOM_STATUS_TTL_MS)
+        );
+      }
+    } else if (lastActivity && (await sendPresence(lastActivity, SLOT_BUDGET_MS))) {
+      // Sin título compartido: al menos se mantiene viva la sesión
+      label = "Discord ✓";
+    }
+  }
+
+  return { items: [{ id: "rpc", text: label }], refreshMs: 20000 };
+}
+
+export async function playerSlotAction() {
+  return null;
 }
 
 export async function panelAction(event, context) {

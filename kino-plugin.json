@@ -1,7 +1,7 @@
 {
   "id": "discord-rpc",
   "name": "Discord RPC",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "apiVersion": 13,
   "entry": "plugin.js",
   "hosts": [
@@ -75,6 +75,14 @@
   "enhancements": {
     "20": {
       "visualBrowser": true
+    },
+    "23": {
+      "capabilities": ["playerSlot"],
+      "slot": {
+        "elements": [
+          { "id": "rpc", "kind": "text", "mode": "overlay" }
+        ]
+      }
     }
   }
 }
