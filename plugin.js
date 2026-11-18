@@ -1,4 +1,4 @@
-// Discord RPC — Kino TV plugin v1.0.11
+// Discord RPC — Kino TV plugin v1.0.12
 // Muestra en Discord lo que se está viendo en Kino (de cualquier plugin) con el
 // Gateway de Discord por WebSocket.
 // Protocolo basado en Kizzy (github.com/dead8309/Kizzy), adaptado a QuickJS/Kino.
@@ -63,11 +63,18 @@ function clip(text, max) {
 }
 
 async function getToken() {
+  let token = "";
   try {
-    return String(kino.config.get("discord_token") || "").trim();
+    token = String(kino.config.get("discord_token") || "");
   } catch (_) {
-    return "";
+    token = "";
   }
+  if (!token) {
+    // Copia de seguridad: si el ajuste no llega, sirve la guardada al vincular.
+    try { token = String(kino.storage.get("token_backup") || ""); } catch (_) {}
+  }
+  // Al pegar, es fácil arrastrar comillas o espacios
+  return token.replace(/^[\s"']+/, "").replace(/[\s"']+$/, "");
 }
 
 function isValidToken(t) {
@@ -237,6 +244,11 @@ async function ensureConnected(deadline) {
   if (connected && ws) return true;
   if (ws) await closeSocket();
 
+  if (!kino.ws) {
+    kino.log("discord-rpc: kino.ws no existe (falta el permiso de «socket»)");
+    return false;
+  }
+
   let socket;
   try {
     socket = await kino.ws.open(GATEWAY_URL);
@@ -249,7 +261,10 @@ async function ensureConnected(deadline) {
   resetSocketState();
 
   const ok = await pump(socket, deadline, token);
-  if (!ok) await closeSocket();
+  if (!ok) {
+    kino.log("discord-rpc: el Gateway no llegó a READY");
+    await closeSocket();
+  }
   return ok;
 }
 
@@ -501,6 +516,9 @@ export async function action(key) {
       return { message: "Discord rechazó ese token. Inicia sesión de nuevo." };
     }
 
+    // Copia de seguridad por si el ajuste no llega a las llamadas del player
+    try { kino.storage.set("token_backup", token); } catch (_) {}
+
     // kino.config es de sólo lectura: el token se guarda con setSettings
     return {
       message: "Cuenta de Discord vinculada ✓",
@@ -511,6 +529,7 @@ export async function action(key) {
   if (key === "unlink_account") {
     await closeSocket();
     rememberSync(0);
+    try { kino.storage.remove("token_backup"); } catch (_) {}
     return { message: "Cuenta desvinculada.", clearSettings: ["discord_token"] };
   }
 
@@ -645,12 +664,19 @@ function contextFromTrack(event) {
 }
 
 export async function track(event) {
-  rememberEvent(event && event.type);
+  const type = (event && event.type) || "?";
+  const startedAt = Date.now();
+  rememberEvent(type);
 
   const token = await getToken();
-  if (!isValidToken(token)) return { ok: true };
-
-  const type = event && event.type;
+  if (!isValidToken(token)) {
+    kino.log(
+      `discord-rpc: ${type} sin token válido (` +
+        (token ? "formato no reconocido, " + token.length + " caracteres" : "vacío") +
+        "), no se envía nada"
+    );
+    return { ok: true };
+  }
 
   if (type === "start" || type === "progress") {
     const paused = type === "progress" && event.paused === true;
@@ -659,17 +685,25 @@ export async function track(event) {
     const ok = await sendPresence(buildActivity(context, paused), TRACK_BUDGET_MS);
     rememberSync(ok ? Date.now() : 0);
 
+    let custom = "apagado";
     if (persistStatus()) {
       if (!paused) await rememberCustomStatus(token);
-      await patchCustomStatus(
+      const done = await patchCustomStatus(
         token,
         customFor(customStatusText(context, paused), Date.now() + CUSTOM_STATUS_TTL_MS)
       );
+      custom = done ? "puesto" : "NO";
     }
+
+    kino.log(
+      `discord-rpc: ${type}${paused ? " (pausa)" : ""} · presencia ${ok ? "enviada" : "NO"}` +
+        ` · estado personalizado ${custom} · ${Date.now() - startedAt} ms`
+    );
   } else if (type === "stop" || type === "watched") {
     await clearPresence();
     rememberSync(0);
     if (persistStatus()) await restoreCustomStatus(token);
+    kino.log(`discord-rpc: ${type} · presencia borrada · ${Date.now() - startedAt} ms`);
   }
 
   // Nunca se falla: un estado que no se pudo enviar no merece reintentos.
