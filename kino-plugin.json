@@ -1,47 +1,53 @@
 {
   "id": "discord-rpc",
   "name": "Discord RPC",
-  "version": "1.0.14",
-  "apiVersion": 13,
+  "version": "1.2.0",
+  "apiVersion": 15,
   "entry": "plugin.js",
+  "icon": "icon.png",
+  "color": "#5865F2",
+  "description": "Muestra en Discord lo que ves en Kino: la película o el capítulo en tu perfil, estado personalizado y una pantalla guía para vincular tu cuenta en un minuto. Funciona solo, sin configurar nada.",
+  "author": "JuanDEVYT",
+  "creator": "JuandreXter",
+  "homepage": "https://github.com/JuanDEVYT/kino-discord-rpc",
+  "categories": ["utilities"],
   "hosts": [
     "discord.com",
-    "gateway.discord.gg",
-    "image.tmdb.org"
+    "juandiscordrpc.pythonanywhere.com"
   ],
-  "capabilities": ["socket", "tracking", "resolve", "search"],
+  "capabilities": ["tracking", "screen", "playerPanelTab", "notifications"],
+  "screen": {
+    "label": "Kino TV",
+    "labelEn": "Kino TV",
+    "iconFile": "screen-icon.png",
+    "menuOpens": "screen",
+    "opensFrom": ["menu", "settings"],
+    "settingsIn": "screen"
+  },
   "panel": {
+    "contributes": true,
     "label": "Discord RPC",
     "labelEn": "Discord RPC",
-    "icon": "bolt"
+    "iconFile": "panel-icon.png"
+  },
+  "secrets": {
+    "relaySecret": "kino-sealed:v1:nZxeD07u-ctxWNXJ690fXudlgvLDCaDbaNBEdLdJPnAHt2p94YeYQjNqHRyqjstbaNlXPjD6Xe5K4ncsp23sD4wwcJ9DbGQDFWnyqpZYXofGH7fov9X-DIyzTvbaSWtSyGo5KIYT1CKXNFpdCcWrkjn5Qs_T85FMDK380A"
   },
   "settings": [
-    {
-      "key": "discord_token",
-      "type": "password",
-      "label": "Token de Discord",
-      "labelEn": "Discord token",
-      "hint": "Vincula tu cuenta con el botón de abajo, o pega el token manualmente",
-      "hintEn": "Link your account below, or paste the token manually",
-      "sync": false
-    },
-    {
-      "key": "link_account",
-      "type": "action",
-      "label": "Vincular cuenta de Discord",
-      "labelEn": "Link Discord account"
-    },
-    {
-      "key": "unlink_account",
-      "type": "action",
-      "label": "Desvincular cuenta",
-      "labelEn": "Unlink account"
-    },
     {
       "key": "discord_status",
       "type": "status",
       "label": "Estado",
       "labelEn": "Status"
+    },
+    {
+      "key": "discord_token",
+      "type": "password",
+      "label": "Token de Discord",
+      "labelEn": "Discord token",
+      "hint": "Lo guarda el botón de vincular; también puedes pegarlo aquí a mano",
+      "hintEn": "Filled by the Link button; you can also paste it here manually",
+      "sync": false
     },
     {
       "key": "test_status",
@@ -50,6 +56,14 @@
       "labelEn": "Test status now",
       "hint": "Envía un estado de prueba a Discord; se quita solo en un minuto",
       "hintEn": "Sends a test status to Discord; it clears itself in a minute"
+    },
+    {
+      "key": "unlink_account",
+      "type": "action",
+      "label": "Desvincular cuenta",
+      "labelEn": "Unlink account",
+      "hint": "Borra el token de este aparato y el estado que se está mostrando",
+      "hintEn": "Deletes this device's token and the status being shown"
     },
     {
       "key": "persist_status",
@@ -67,7 +81,7 @@
       "labelEn": "Discord button",
       "options": [
         { "value": "install", "label": "Instalar Kino", "labelEn": "Install Kino" },
-        { "value": "none",    "label": "Sin botón",     "labelEn": "No button" }
+        { "value": "none", "label": "Sin botón", "labelEn": "No button" }
       ],
       "default": "install"
     }

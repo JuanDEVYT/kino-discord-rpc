@@ -1,0 +1,13 @@
+# Archivos locales de Kino: nunca suben al repositorio.
+# .kino-secrets.json guarda el secreto del relay en claro (el manifiesto sólo
+# lleva la versión sellada), y el resto es estado privado de cada aparato.
+.kino-secrets.json
+.kino-notices.json
+.kino-cookies.json
+.kino-shared.json
+.kino-storage.json
+*.kino-storage.json.bak
+
+# Sistema
+Thumbs.db
+.DS_Store
