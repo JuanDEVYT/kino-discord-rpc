@@ -1,7 +1,7 @@
 {
   "id": "discord-rpc",
   "name": "Discord RPC",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "apiVersion": 13,
   "entry": "plugin.js",
   "hosts": [
@@ -36,6 +36,29 @@
       "type": "action",
       "label": "Desvincular cuenta",
       "labelEn": "Unlink account"
+    },
+    {
+      "key": "discord_status",
+      "type": "status",
+      "label": "Estado",
+      "labelEn": "Status"
+    },
+    {
+      "key": "test_status",
+      "type": "action",
+      "label": "Probar estado ahora",
+      "labelEn": "Test status now",
+      "hint": "Envía un estado de prueba a Discord; se quita solo en un minuto",
+      "hintEn": "Sends a test status to Discord; it clears itself in a minute"
+    },
+    {
+      "key": "persist_status",
+      "type": "toggle",
+      "label": "Estado personalizado con lo que ves",
+      "labelEn": "Custom status with what you watch",
+      "hint": "Duradero: escribe tu estado de Discord con el título mientras reproduces",
+      "hintEn": "Lasts: writes your Discord status with the title while playing",
+      "default": true
     },
     {
       "key": "show_button",

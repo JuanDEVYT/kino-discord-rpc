@@ -1,4 +1,4 @@
-// Discord RPC — Kino TV plugin v1.0.10
+// Discord RPC — Kino TV plugin v1.0.11
 // Muestra en Discord lo que se está viendo en Kino (de cualquier plugin) con el
 // Gateway de Discord por WebSocket.
 // Protocolo basado en Kizzy (github.com/dead8309/Kizzy), adaptado a QuickJS/Kino.
@@ -21,7 +21,14 @@ const APP_ID = "1570998800338915448";
 const TRACK_BUDGET_MS = 8500;    // track tiene 10 s
 const PLAYER_BUDGET_MS = 4000;   // playerEvent tiene 5 s
 const PANEL_BUDGET_MS = 15000;   // panel y panelAction tienen 20 s
+const ACTION_BUDGET_MS = 25000;  // action tiene 30 s
 const FRAME_WAIT_MS = 1500;      // trozo de espera de cada recv
+
+// Discord cierra la sesión del Gateway si no hay latido: con ninguna llamada en
+// curso, el estado dura ~60 s. El estado personalizado (REST) sí persiste, y se
+// renueva en cada evento y se vence solo si Kino deja de avisar.
+const CUSTOM_STATUS_TTL_MS = 6 * 60000;
+const CUSTOM_STATUS_API = "https://discord.com/api/v9/users/@me/settings";
 
 const MANUAL_HINT =
   "Para vincular a mano: abre Discord web → F12 → Consola → pega " +
@@ -67,6 +74,21 @@ function isValidToken(t) {
   // Token de usuario de Discord: Base64(userId).timestamp.hmac
   return typeof t === "string" && t.length >= 60 &&
     /^[A-Za-z0-9+/_-]{20,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{20,}$/.test(t);
+}
+
+function persistStatus() {
+  try {
+    return kino.config.get("persist_status") !== false;
+  } catch (_) {
+    return true;
+  }
+}
+
+function rememberEvent(type) {
+  try {
+    kino.storage.set("last_event", String(type || "?"));
+    kino.storage.set("last_event_at", String(Date.now()));
+  } catch (_) {}
 }
 
 function showButton() {
@@ -278,6 +300,92 @@ async function clearPresence() {
   await closeSocket();
 }
 
+// ── Estado personalizado (REST: persiste sin conexión) ───────────────────────
+
+async function patchCustomStatus(token, custom) {
+  try {
+    const r = await kino.fetch(CUSTOM_STATUS_API, {
+      method: "PATCH",
+      headers: { Authorization: token, "Content-Type": "application/json" },
+      body: JSON.stringify({ custom_status: custom }),
+      timeoutMs: 10000,
+    });
+    if (!r.ok) kino.log("discord-rpc: estado personalizado", r.status);
+    return r.ok;
+  } catch (e) {
+    kino.log("discord-rpc: estado personalizado falló", e && (e.code || e.message));
+    return false;
+  }
+}
+
+function customFor(text, expiresAtMs) {
+  return {
+    text: clip(text, 128),
+    emoji_name: null,
+    expires_at: new Date(expiresAtMs).toISOString().replace("Z", "+00:00"),
+  };
+}
+
+function customStatusText(context, paused) {
+  const isEpisode = context.kind === "episode";
+  const what = isEpisode
+    ? `${context.title || "Kino TV"}${context.season ? ` T${context.season}` : ""}${context.episode ? `E${context.episode}` : ""}`
+    : (context.title || "Kino TV");
+  return `${paused ? "⏸ Pausado:" : "▶ Viendo"} ${what}`;
+}
+
+// Guarda el estado personalizado de la persona una sola vez por reproducción.
+async function rememberCustomStatus(token) {
+  try {
+    if (kino.storage.get("custom_saved")) return;
+  } catch (_) {
+    return;
+  }
+  let prev = null;
+  try {
+    const r = await kino.fetch(CUSTOM_STATUS_API, {
+      headers: { Authorization: token },
+      timeoutMs: 10000,
+    });
+    if (r.ok) {
+      const s = r.json();
+      if (s && s.custom_status) prev = s.custom_status;
+      // Un estado nuestro que quedó colgado no es «el suyo»
+      const text = prev && typeof prev.text === "string" ? prev.text : "";
+      if (/^[▶⏸] (Viendo|Pausado|Probando)/.test(text)) prev = null;
+    }
+  } catch (_) {}
+  try {
+    kino.storage.set("custom_prev", JSON.stringify(prev));
+    kino.storage.set("custom_saved", "1");
+  } catch (_) {}
+}
+
+async function restoreCustomStatus(token) {
+  let saved = null;
+  let had = false;
+  try {
+    had = Boolean(kino.storage.get("custom_saved"));
+    if (had) saved = JSON.parse(kino.storage.get("custom_prev") || "null");
+  } catch (_) {
+    saved = null;
+  }
+  try {
+    kino.storage.remove("custom_saved");
+    kino.storage.remove("custom_prev");
+  } catch (_) {}
+  if (!had) return;
+  if (saved) {
+    await patchCustomStatus(token, {
+      text: saved.text || "",
+      emoji_name: saved.emoji_name || null,
+      expires_at: saved.expires_at || null,
+    });
+  } else {
+    await patchCustomStatus(token, null);
+  }
+}
+
 // ── Actividad ─────────────────────────────────────────────────────────────────
 
 function buildActivity(context, paused) {
@@ -330,6 +438,22 @@ export async function resolve() {
 // ── Action de settings: vincular cuenta ──────────────────────────────────────
 
 export async function action(key) {
+  if (key === "test_status") {
+    const token = await getToken();
+    if (!isValidToken(token)) {
+      return { message: "Primero vincula tu cuenta de Discord aquí arriba." };
+    }
+    const ok = await sendPresence(
+      buildActivity({ kind: "movie", title: "Prueba de estado", positionMs: 0, durationMs: 0 }, false),
+      ACTION_BUDGET_MS
+    );
+    rememberSync(ok ? Date.now() : 0);
+    if (!ok) {
+      return { message: "No se pudo conectar con Discord. Revisa internet y reintenta." };
+    }
+    return { message: "Estado de prueba enviado ✓ Mira tu perfil de Discord (se quita solo en ~1 minuto)." };
+  }
+
   if (key === "link_account") {
     // Kino sin la ventana web (o un escritorio): instrucciones manuales
     if (!kino.visualBrowser || !kino.visualBrowser.available) {
@@ -410,6 +534,34 @@ async function checkToken(token) {
     // Sin red o host bloqueado: no se descarta un token que parece válido
     return true;
   }
+}
+
+// ── Ajustes: línea de estado ─────────────────────────────────────────────────
+
+export async function settingsStatus() {
+  const token = await getToken();
+  if (!isValidToken(token)) {
+    return { discord_status: "⚠ Falta el token: usa «Vincular cuenta de Discord»" };
+  }
+
+  const syncAge = lastSyncAge();
+  let lastType = "";
+  let lastAt = 0;
+  try {
+    lastType = String(kino.storage.get("last_event") || "");
+    lastAt = Number(kino.storage.get("last_event_at") || 0);
+  } catch (_) {}
+
+  if (lastAt > 0) {
+    const sent = syncAge >= 0 ? `estado enviado ${formatAge(syncAge, false)}` : "sin estado activo";
+    return {
+      discord_status: `✓ Kino avisó (${lastType}) ${formatAge(Date.now() - lastAt, false)} · ${sent}`,
+    };
+  }
+
+  return {
+    discord_status: "○ Sin avisos de reproducción: revisa el permiso de «tracking» en este plugin",
+  };
 }
 
 // ── Panel ─────────────────────────────────────────────────────────────────────
@@ -493,6 +645,8 @@ function contextFromTrack(event) {
 }
 
 export async function track(event) {
+  rememberEvent(event && event.type);
+
   const token = await getToken();
   if (!isValidToken(token)) return { ok: true };
 
@@ -500,11 +654,22 @@ export async function track(event) {
 
   if (type === "start" || type === "progress") {
     const paused = type === "progress" && event.paused === true;
-    const ok = await sendPresence(buildActivity(contextFromTrack(event), paused), TRACK_BUDGET_MS);
+    const context = contextFromTrack(event);
+
+    const ok = await sendPresence(buildActivity(context, paused), TRACK_BUDGET_MS);
     rememberSync(ok ? Date.now() : 0);
+
+    if (persistStatus()) {
+      if (!paused) await rememberCustomStatus(token);
+      await patchCustomStatus(
+        token,
+        customFor(customStatusText(context, paused), Date.now() + CUSTOM_STATUS_TTL_MS)
+      );
+    }
   } else if (type === "stop" || type === "watched") {
     await clearPresence();
     rememberSync(0);
+    if (persistStatus()) await restoreCustomStatus(token);
   }
 
   // Nunca se falla: un estado que no se pudo enviar no merece reintentos.
