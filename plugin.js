@@ -1,12 +1,14 @@
-// Discord RPC — Kino TV plugin v1.2.0
+// Discord RPC — Kino TV plugin v1.2.1
 // Muestra en Discord lo que se está viendo en Kino (de cualquier plugin).
 //
-// Todo pasa por el relay oficial (juandiscordrpc.pythonanywhere.com): un
+// Todo pasa por el relay oficial (api.juandiscordrpc.workers.dev): un
 // servidor siempre encendido que mantiene la sesión de Discord abierta con su
 // propio latido, así la actividad sigue en el perfil aunque Kino deje de
 // llamar. El secreto del relay viaja sellado en el manifiesto
 // (secrets.relaySecret) y se lee con kino.secret(): no hay nada que configurar.
 //
+// v1.2.1: el relay oficial cambió a Cloudflare Workers
+// (api.juandiscordrpc.workers.dev); misma interfaz, sin cambios para la gente.
 // v1.2.0: pantalla guía con tres pestañas (Estado, Vincular y Ajustes),
 // pestaña aportada al panel del reproductor, aviso en la campanita cuando
 // Discord rechaza el token, estadística local de envíos y una capa de
@@ -14,8 +16,8 @@
 // y errores clasificados en español e inglés.
 
 const APP_ID = "1570998800338915448";
-const PLUGIN_VERSION = "1.2.0"; // debe coincidir con kino-plugin.json
-const RELAY_URL = "https://juandiscordrpc.pythonanywhere.com";
+const PLUGIN_VERSION = "1.2.1"; // debe coincidir con kino-plugin.json
+const RELAY_URL = "https://api.juandiscordrpc.workers.dev";
 const RELAY_TTL_SEC = 120; // lo que dura sin refresco; el player slot renueva cada 20 s
 const CUSTOM_STATUS_TTL_MS = 6 * 60000;
 
