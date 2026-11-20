@@ -7,6 +7,8 @@
 // llamar. El secreto del relay viaja sellado en el manifiesto
 // (secrets.relaySecret) y se lee con kino.secret(): no hay nada que configurar.
 //
+// v1.2.4: timestamps en milisegundos (con segundos el reloj no avanzaba) y
+// `end` siempre que haya duración: eso dibuja la progress bar en Discord.
 // v1.2.3: logo de la actividad por ID de asset (1571002743286530229): con el
 // nombre "kino_logo" el cliente no resolvía la imagen y salía un "?".
 // v1.2.2: sin botones en la actividad: Discord descarta la actividad entera
@@ -20,7 +22,7 @@
 // y errores clasificados en español e inglés.
 
 const APP_ID = "1570998800338915448";
-const PLUGIN_VERSION = "1.2.3"; // debe coincidir con kino-plugin.json
+const PLUGIN_VERSION = "1.2.4"; // debe coincidir con kino-plugin.json
 const RELAY_URL = "https://api.juandiscordrpc.workers.dev";
 const RELAY_TTL_SEC = 120; // lo que dura sin refresco; el player slot renueva cada 20 s
 const CUSTOM_STATUS_TTL_MS = 6 * 60000;
@@ -509,10 +511,11 @@ function buildActivity(context, paused) {
     : paused ? "⏸ Pausado" : "▶ Reproduciendo";
 
   const now = Date.now();
-  const startS = Math.floor((now - (context.positionMs || 0)) / 1000);
-  const endS = context.durationMs
-    ? Math.floor((now - (context.positionMs || 0) + context.durationMs) / 1000)
-    : null;
+  // Discord espera los timestamps en MILISEGUDOS: con segundos el reloj de la
+  // actividad se quedaba congelado. `end` (también en ms) es lo que dibuja la
+  // progress bar; sin duración sólo se manda `start` (cronómetro que sube).
+  const startMs = now - (context.positionMs || 0);
+  const endMs = context.durationMs ? startMs + context.durationMs : null;
 
   const activity = {
     name: "Kino TV",
@@ -528,7 +531,9 @@ function buildActivity(context, paused) {
     },
   };
 
-  if (!paused && endS) activity.timestamps = { start: startS, end: endS };
+  if (!paused) {
+    activity.timestamps = endMs ? { start: startMs, end: endMs } : { start: startMs };
+  }
 
   return activity;
 }
