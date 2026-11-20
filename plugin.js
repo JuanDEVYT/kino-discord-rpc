@@ -7,6 +7,8 @@
 // llamar. El secreto del relay viaja sellado en el manifiesto
 // (secrets.relaySecret) y se lee con kino.secret(): no hay nada que configurar.
 //
+// v1.2.3: logo de la actividad por ID de asset (1571002743286530229): con el
+// nombre "kino_logo" el cliente no resolvía la imagen y salía un "?".
 // v1.2.2: sin botones en la actividad: Discord descarta la actividad entera
 // (op3 con buttons) y sólo se veía el estado personalizado.
 // v1.2.1: el relay oficial cambió a Cloudflare Workers
@@ -18,7 +20,7 @@
 // y errores clasificados en español e inglés.
 
 const APP_ID = "1570998800338915448";
-const PLUGIN_VERSION = "1.2.2"; // debe coincidir con kino-plugin.json
+const PLUGIN_VERSION = "1.2.3"; // debe coincidir con kino-plugin.json
 const RELAY_URL = "https://api.juandiscordrpc.workers.dev";
 const RELAY_TTL_SEC = 120; // lo que dura sin refresco; el player slot renueva cada 20 s
 const CUSTOM_STATUS_TTL_MS = 6 * 60000;
@@ -519,7 +521,9 @@ function buildActivity(context, paused) {
     details,
     state,
     assets: {
-      large_image: "kino_logo",
+      // ID del asset (snowflake), no el nombre: Discord sólo resuelve
+      // {application_asset_id}, con "kino_logo" salía el "?" en el cliente.
+      large_image: "1571002743286530229",
       large_text: "Kino TV",
     },
   };
