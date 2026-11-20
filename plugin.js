@@ -1,4 +1,4 @@
-// Discord RPC — Kino TV plugin v1.2.1
+// Discord RPC — Kino TV plugin v1.2.2
 // Muestra en Discord lo que se está viendo en Kino (de cualquier plugin).
 //
 // Todo pasa por el relay oficial (api.juandiscordrpc.workers.dev): un
@@ -7,6 +7,8 @@
 // llamar. El secreto del relay viaja sellado en el manifiesto
 // (secrets.relaySecret) y se lee con kino.secret(): no hay nada que configurar.
 //
+// v1.2.2: sin botones en la actividad: Discord descarta la actividad entera
+// (op3 con buttons) y sólo se veía el estado personalizado.
 // v1.2.1: el relay oficial cambió a Cloudflare Workers
 // (api.juandiscordrpc.workers.dev); misma interfaz, sin cambios para la gente.
 // v1.2.0: pantalla guía con tres pestañas (Estado, Vincular y Ajustes),
@@ -16,7 +18,7 @@
 // y errores clasificados en español e inglés.
 
 const APP_ID = "1570998800338915448";
-const PLUGIN_VERSION = "1.2.1"; // debe coincidir con kino-plugin.json
+const PLUGIN_VERSION = "1.2.2"; // debe coincidir con kino-plugin.json
 const RELAY_URL = "https://api.juandiscordrpc.workers.dev";
 const RELAY_TTL_SEC = 120; // lo que dura sin refresco; el player slot renueva cada 20 s
 const CUSTOM_STATUS_TTL_MS = 6 * 60000;
@@ -174,14 +176,6 @@ function isValidToken(t) {
 function persistStatus() {
   try {
     return kino.config.get("persist_status") !== false;
-  } catch (_) {
-    return true;
-  }
-}
-
-function showButton() {
-  try {
-    return kino.config.get("show_button") !== "none";
   } catch (_) {
     return true;
   }
@@ -531,10 +525,6 @@ function buildActivity(context, paused) {
   };
 
   if (!paused && endS) activity.timestamps = { start: startS, end: endS };
-
-  if (showButton()) {
-    activity.buttons = [{ label: "Instalar Kino", url: "https://kinotvapp.github.io" }];
-  }
 
   return activity;
 }

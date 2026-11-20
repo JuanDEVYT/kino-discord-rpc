@@ -1,7 +1,7 @@
 {
   "id": "discord-rpc",
   "name": "Discord RPC",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "apiVersion": 15,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -73,17 +73,6 @@
       "hint": "Duradero: escribe tu estado de Discord con el título mientras reproduces",
       "hintEn": "Lasts: writes your Discord status with the title while playing",
       "default": true
-    },
-    {
-      "key": "show_button",
-      "type": "select",
-      "label": "Botón en Discord",
-      "labelEn": "Discord button",
-      "options": [
-        { "value": "install", "label": "Instalar Kino", "labelEn": "Install Kino" },
-        { "value": "none", "label": "Sin botón", "labelEn": "No button" }
-      ],
-      "default": "install"
     }
   ],
   "enhancements": {
