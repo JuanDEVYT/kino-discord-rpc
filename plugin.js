@@ -317,7 +317,10 @@ const PLUGIN_ID = "discord-rpc";
 
 // Resuelve el secreto del relay con la bóveda de Kino (secrets.kinoverse.app)
 // Solo se puede invocar desde llamadas originadas por la persona (screenEvent, panelAction, etc.)
+let vaultAttempted = false;
 async function fetchVaultSecret() {
+  if (vaultAttempted) return sget("vault_relay_secret") || null;
+  vaultAttempted = true;
   try {
     if (!kino.identity || typeof kino.identity.telegram !== "function") return null;
 
@@ -1226,9 +1229,6 @@ async function onLink(en) {
 
   // Copia de seguridad por si el ajuste no llega a las llamadas del player
   sset("token_backup", token);
-  if (!relaySecret()) {
-    await fetchVaultSecret();
-  }
   forgetTokenRejection();
   // Si hubo un aviso por token rechazado, un enlace nuevo vuelve a abrir la
   // puerta: si Discord lo rechaza otra vez, la campanita avisará de nuevo.
@@ -1254,9 +1254,6 @@ async function onSaveToken(ev) {
     return { toast: "Discord rechazó ese token.", toastEn: "Discord rejected that token." };
   }
   sset("token_backup", token);
-  if (!relaySecret()) {
-    await fetchVaultSecret();
-  }
   forgetTokenRejection();
   sdel("rej_notified"); // un token guardado a mano también vuelve a abrir el aviso
   return {
@@ -1486,9 +1483,6 @@ export async function panelAction(event, context) {
     }
 
     if (key === "sync_now") {
-      if (!relaySecret()) {
-        await fetchVaultSecret();
-      }
       if (!isValidToken(await getToken())) {
         return {
           message: en
