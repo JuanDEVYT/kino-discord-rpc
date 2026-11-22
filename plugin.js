@@ -22,7 +22,7 @@
 // y errores clasificados en español e inglés.
 
 const APP_ID = "1570998800338915448";
-const PLUGIN_VERSION = "1.2.4"; // debe coincidir con kino-plugin.json
+const PLUGIN_VERSION = "1.3.0"; // debe coincidir con kino-plugin.json
 const RELAY_URL = "https://api.juandiscordrpc.workers.dev";
 const RELAY_TTL_SEC = 120; // lo que dura sin refresco; el player slot renueva cada 20 s
 const CUSTOM_STATUS_TTL_MS = 6 * 60000;
@@ -55,6 +55,16 @@ const MANUAL_HINT =
 // pestaña Estado cuando la persona actualiza (la marcada vista, en
 // kino.storage["novedades_vista"]).
 const NOVEDADES = {
+  "1.3.0": {
+    es: [
+      "Conexión con la bóveda de secretos de Kino para el relay.",
+      "Mayor estabilidad y seguridad sin claves quemadas.",
+    ],
+    en: [
+      "Integration with Kino's secrets vault for the relay.",
+      "Greater stability and security without hardcoded keys.",
+    ],
+  },
   "1.2.0": {
     es: [
       "Pantalla nueva con tres pestañas: Estado, Vincular y Ajustes.",
@@ -299,11 +309,76 @@ function pendingNovedades() {
   return out;
 }
 
-// ── Relay ─────────────────────────────────────────────────────────────────────
+// ── Relay y Bóveda ────────────────────────────────────────────────────────────
 
-// El valor sale del sello del manifiesto: kino.secret() devuelve la marca y la
-// app la sustituye por el secreto antes de mandar la petición.
+const VAULT_URL = "https://secrets.kinoverse.app";
+const REPO_ID = "juandevyt/kino-discord-rpc";
+const PLUGIN_ID = "discord-rpc";
+
+// Resuelve el secreto del relay con la bóveda de Kino (secrets.kinoverse.app)
+// Solo se puede invocar desde llamadas originadas por la persona (screenEvent, panelAction, etc.)
+async function fetchVaultSecret() {
+  try {
+    if (!kino.identity || typeof kino.identity.telegram !== "function") return null;
+
+    // 1. Desafío de un solo uso
+    const chRes = await kino.fetch(VAULT_URL + "/session/challenge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+      timeoutMs: 10000,
+    });
+    if (!chRes.ok) return null;
+    const { challenge } = chRes.json() || {};
+    if (!challenge) return null;
+
+    // 2. Atestación con la llave del dispositivo
+    const who = await kino.identity.telegram({ challenge });
+    if (!who || !who.signature) return null;
+
+    // 3. Resolución del secreto
+    const secRes = await kino.fetch(VAULT_URL + "/secrets/" + REPO_ID, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pluginId: PLUGIN_ID,
+        challenge,
+        id: who.id,
+        deviceKey: who.deviceKey,
+        signature: who.signature,
+        author: who.author || "",
+        codeHash: who.codeHash || "",
+        token: who.token,
+      }),
+      timeoutMs: 15000,
+    });
+
+    if (!secRes.ok) return null;
+    const body = secRes.json() || {};
+    const val = body.secret;
+    let extracted = "";
+    if (typeof val === "string") {
+      extracted = val.trim();
+    } else if (val && typeof val === "object") {
+      extracted = String(val.relaySecret || val.secret || val.key || "").trim();
+    }
+
+    if (extracted) {
+      sset("vault_relay_secret", extracted);
+      return extracted;
+    }
+  } catch (e) {
+    kino.log("discord-rpc: fetchVaultSecret", e && (e.code || e.message));
+  }
+  return null;
+}
+
+// Obtiene el secreto del relay:
+// 1. Desde la caché duradera guardada por la bóveda (sin caducidad).
+// 2. Respaldo por kino.secret() si la app aún provee el sello nativo.
 function relaySecret() {
+  const cached = String(sget("vault_relay_secret") || "").trim();
+  if (cached) return cached;
   try {
     const s = kino.secret("relaySecret");
     return typeof s === "string" ? s.trim() : "";
@@ -1075,6 +1150,10 @@ async function onOpen(ev) {
   sdel("custom_saved");
   sdel("custom_prev");
 
+  if (!relaySecret()) {
+    await fetchVaultSecret();
+  }
+
   const patch = {};
   if (TABS.includes(ev.route)) patch.tab = ev.route;
   await notifyTokenRejected();
@@ -1147,6 +1226,9 @@ async function onLink(en) {
 
   // Copia de seguridad por si el ajuste no llega a las llamadas del player
   sset("token_backup", token);
+  if (!relaySecret()) {
+    await fetchVaultSecret();
+  }
   forgetTokenRejection();
   // Si hubo un aviso por token rechazado, un enlace nuevo vuelve a abrir la
   // puerta: si Discord lo rechaza otra vez, la campanita avisará de nuevo.
@@ -1172,6 +1254,9 @@ async function onSaveToken(ev) {
     return { toast: "Discord rechazó ese token.", toastEn: "Discord rejected that token." };
   }
   sset("token_backup", token);
+  if (!relaySecret()) {
+    await fetchVaultSecret();
+  }
   forgetTokenRejection();
   sdel("rej_notified"); // un token guardado a mano también vuelve a abrir el aviso
   return {
@@ -1183,6 +1268,9 @@ async function onSaveToken(ev) {
 }
 
 async function onTest(en) {
+  if (!relaySecret()) {
+    await fetchVaultSecret();
+  }
   const token = await getToken();
   if (!isValidToken(token)) {
     return { toast: "Primero vincula tu cuenta de Discord.", toastEn: "Link your Discord account first." };
@@ -1398,6 +1486,9 @@ export async function panelAction(event, context) {
     }
 
     if (key === "sync_now") {
+      if (!relaySecret()) {
+        await fetchVaultSecret();
+      }
       if (!isValidToken(await getToken())) {
         return {
           message: en

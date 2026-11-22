@@ -1,7 +1,7 @@
 {
   "id": "discord-rpc",
   "name": "Discord RPC",
-  "version": "1.2.4",
+  "version": "1.3.0",
   "apiVersion": 15,
   "entry": "plugin.js",
   "icon": "icon.png",
@@ -15,13 +15,15 @@
   ],
   "hosts": [
     "discord.com",
-    "api.juandiscordrpc.workers.dev"
+    "api.juandiscordrpc.workers.dev",
+    "secrets.kinoverse.app"
   ],
   "capabilities": [
     "tracking",
     "screen",
     "playerPanelTab",
-    "notifications"
+    "notifications",
+    "identity"
   ],
   "screen": {
     "label": "Kino TV",
@@ -106,6 +108,6 @@
   },
   "signature": {
     "authorKey": "0036d8031405ef39f52a4c120617f46a8db166fa23867367f7ae68360f7e31cd",
-    "value": "37c9e813d42038f6a7a7665cbb7829b55a169c8cf4f0c5ece12285398be1c9fb7d2e22c785acba5d27d08575ff103174f17f84ce047d6607365b89d1d743a303"
+    "value": "ab0cd25af4a4511b66f2b2b34ebed42939909f1909f5e6ce712eb753f0c11c21009904b9aa510cdc8a2ccba7de3b842741bc623601e8ac17dd380e3deedd030c"
   }
 }
